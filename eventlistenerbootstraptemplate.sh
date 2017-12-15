@@ -1,4 +1,4 @@
-#/bin/bash
+#!/bin/bash
 
 #AWS EMR Bootstrap script
 #tested with emr-5.10.0
