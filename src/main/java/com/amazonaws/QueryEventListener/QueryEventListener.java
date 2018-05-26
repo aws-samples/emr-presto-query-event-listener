@@ -16,17 +16,16 @@ package com.amazonaws.QueryEventListener;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Map;
-import java.util.NoSuchElementException;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
+import java.util.*;
 import java.util.logging.FileHandler;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
 
+import com.facebook.presto.spi.eventlistener.*;
 import com.facebook.presto.spi.eventlistener.EventListener;
-import com.facebook.presto.spi.eventlistener.QueryCompletedEvent;
-import com.facebook.presto.spi.eventlistener.QueryCreatedEvent;
-import com.facebook.presto.spi.eventlistener.SplitCompletedEvent;
 
 public class QueryEventListener
         implements EventListener
@@ -34,6 +33,11 @@ public class QueryEventListener
     Logger logger;
     FileHandler fh;
     final String loggerName = "QueryLog";
+    PrestoCloudWatchWrapper cloudWatchWrapper = new PrestoCloudWatchWrapper();
+    DateTimeFormatter formatter =
+            DateTimeFormatter.ofLocalizedDateTime( FormatStyle.SHORT )
+                    .withLocale( Locale.GERMAN )
+                    .withZone( ZoneId.systemDefault() );
 
     public QueryEventListener()
     {
@@ -53,59 +57,30 @@ public class QueryEventListener
     {
 
         StringBuilder msg = new StringBuilder();
+        HashMap<String, String> prestoCWDimensions = new HashMap<>();
 
         try {
+            prestoCWDimensions.put("queryId", queryCreatedEvent.getMetadata().getQueryId());
+            prestoCWDimensions.put("createTime", formatter.format(queryCreatedEvent.getCreateTime()));
+            prestoCWDimensions.put("queryState", queryCreatedEvent.getMetadata().getQueryState());
+            prestoCWDimensions.put("prestoServer", queryCreatedEvent.getContext().getServerAddress());
+            prestoCWDimensions.put("catalog", queryCreatedEvent.getContext().getCatalog().orElse("default"));
+            prestoCWDimensions.put("schema", queryCreatedEvent.getContext().getSchema().orElse("default"));
+            prestoCWDimensions.put("principal", queryCreatedEvent.getContext().getPrincipal().orElse("admin"));
+            prestoCWDimensions.put("user", queryCreatedEvent.getContext().getUser());
+            prestoCWDimensions.put("userAgent", queryCreatedEvent.getContext().getUserAgent().orElse("None"));
 
-            msg.append("---------------Query Created----------------------------");
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Query ID: ");
-            msg.append(queryCreatedEvent.getMetadata().getQueryId().toString());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Query State: ");
-            msg.append(queryCreatedEvent.getMetadata().getQueryState().toString());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("User: ");
-            msg.append(queryCreatedEvent.getContext().getUser().toString());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Create Time: ");
-            msg.append(queryCreatedEvent.getCreateTime());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Principal: ");
-            msg.append(queryCreatedEvent.getContext().getPrincipal());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Remote Client Address: ");
-            msg.append(queryCreatedEvent.getContext().getRemoteClientAddress());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Source: ");
-            msg.append(queryCreatedEvent.getContext().getSource());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("User Agent: ");
-            msg.append(queryCreatedEvent.getContext().getUserAgent());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Catalog: ");
-            msg.append(queryCreatedEvent.getContext().getCatalog());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Schema: ");
-            msg.append(queryCreatedEvent.getContext().getSchema());
-            msg.append("\n");
-            msg.append("     ");
-            msg.append("Server Address: ");
-            msg.append(queryCreatedEvent.getContext().getServerAddress());
-
-            logger.info(msg.toString());
+            cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                    prestoCWDimensions, "QUERY_STARTED",
+                    1.0, "QUERY_STARTED"
+            );
+            logger.info("Query Initialized");
         }
         catch (Exception ex) {
-
+            cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                    prestoCWDimensions, "QUERY_STARTED",
+                    0.0, "QUERY_STARTED"
+            );
             logger.info(ex.getMessage());
         }
 
@@ -116,72 +91,87 @@ public class QueryEventListener
 
         String errorCode = null;
         StringBuilder msg = new StringBuilder();
+        HashMap<String, String> prestoCWDimensions = new HashMap<>();
 
         try {
-            errorCode = queryCompletedEvent.getFailureInfo().get().getErrorCode().getName().toString();
+            errorCode = queryCompletedEvent.getFailureInfo().get().getErrorCode().getName();
         }
         catch (NoSuchElementException noElEx) {
             errorCode = null;
         }
 
         try {
+            String queryId = queryCompletedEvent.getMetadata().getQueryId();
 
             if (errorCode != null) {
 
-                msg.append("---------------Query Completed----------------------------");
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Query ID: ");
-                msg.append(queryCompletedEvent.getMetadata().getQueryId().toString());
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Create Time: ");
-                msg.append(queryCompletedEvent.getCreateTime());
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("User: ");
-                msg.append(queryCompletedEvent.getContext().getUser().toString());
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Complete: ");
-                msg.append(queryCompletedEvent.getStatistics().isComplete());
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Query Failure Error: ");
-                msg.append(errorCode);
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Remote Client Address: ");
-                msg.append(queryCompletedEvent.getContext().getRemoteClientAddress().toString());
+                prestoCWDimensions.put("queryId", queryCompletedEvent.getMetadata().getQueryId());
+                prestoCWDimensions.put("createTime",
+                        formatter.format(queryCompletedEvent.getCreateTime()));
+                prestoCWDimensions.put("user", queryCompletedEvent.getContext().getUser());
+                prestoCWDimensions.put("queryCompleted",
+                        String.valueOf(queryCompletedEvent.getStatistics().isComplete()));
+                prestoCWDimensions.put("queryError", errorCode);
+                prestoCWDimensions.put("remoteClientAddress",
+                        queryCompletedEvent.getContext().getRemoteClientAddress().toString());
 
-                logger.info(msg.toString());
+                cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                        prestoCWDimensions, "QUERY_COMPLETED",
+                        0.0, "QUERY_COMPLETED"
+                );
+
+                logger.info("Query completed with errors. Logs sent to AWS Cloudwatch");
 
             }
             else {
 
-                msg.append("---------------Query Completed----------------------------");
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Query ID: ");
-                msg.append(queryCompletedEvent.getMetadata().getQueryId().toString());
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Create Time: ");
-                msg.append(queryCompletedEvent.getCreateTime());
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("User: ");
-                msg.append(queryCompletedEvent.getContext().getUser().toString());
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Complete: ");
-                msg.append(queryCompletedEvent.getStatistics().isComplete());
-                msg.append("\n");
-                msg.append("     ");
-                msg.append("Remote Client Address: ");
-                msg.append(queryCompletedEvent.getContext().getRemoteClientAddress().toString());
+                prestoCWDimensions.put("queryId", queryCompletedEvent.getMetadata().getQueryId());
+                prestoCWDimensions.put("createTime",
+                        formatter.format(queryCompletedEvent.getCreateTime()));
+                prestoCWDimensions.put("user", queryCompletedEvent.getContext().getUser());
+                prestoCWDimensions.put("queryCompleted",
+                        String.valueOf(queryCompletedEvent.getStatistics().isComplete()));
+                prestoCWDimensions.put("remoteClientAddress",
+                        queryCompletedEvent.getContext().getRemoteClientAddress().toString());
 
-                logger.info(msg.toString());
+                Double totalRows = Double.longBitsToDouble(queryCompletedEvent.getStatistics().getTotalRows());
+                Double totalBytes = Double.longBitsToDouble(queryCompletedEvent.getStatistics().getTotalBytes());
+                Double cpuTime = Double.longBitsToDouble(queryCompletedEvent.getStatistics().getCpuTime().getSeconds() / 60);
+                Double wallTime = Double.longBitsToDouble(queryCompletedEvent.getStatistics().getWallTime().getSeconds() / 60);
+                Double queuedTime = Double.longBitsToDouble(queryCompletedEvent.getStatistics().getQueuedTime().getSeconds() / 60);
+
+                cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                        prestoCWDimensions, "QUERY_COMPLETED",
+                        1.0, "QUERY_COMPLETED"
+                );
+
+                cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                        prestoCWDimensions, "TOTAL_ROWS",
+                        totalRows, "QUERY_COMPLETED"
+                );
+
+                cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                        prestoCWDimensions, "TOTAL_BYTES",
+                        totalBytes, "QUERY_COMPLETED"
+                );
+
+                cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                        prestoCWDimensions, "CPU_TIME",
+                        cpuTime, "QUERY_COMPLETED"
+                );
+
+                cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                        prestoCWDimensions, "WALL_TIME",
+                        wallTime, "QUERY_COMPLETED"
+                );
+
+                cloudWatchWrapper.putPrestoMetricToCloudWatch(
+                        prestoCWDimensions, "QUEUED_TIME",
+                        queuedTime, "QUERY_COMPLETED"
+                );
+
+
+                logger.info("Query completed without errors. Metrics sent to AWS Cloudwatch");
             }
         }
         catch (Exception ex) {
@@ -240,6 +230,11 @@ public class QueryEventListener
         catch (IOException e) {
             logger.info(e.getMessage());
         }
+    }
+
+    public void createQueryCacheFile()
+    {
+
     }
 
 }

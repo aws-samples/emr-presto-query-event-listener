@@ -3,11 +3,28 @@
   <groupId>com.amazonaws</groupId>
   <artifactId>QueryEventListener</artifactId>
   <version>1.0</version>
-  <dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>8</source>
+                    <target>8</target>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+    <dependencies>
   	<dependency>
   		<groupId>com.facebook.presto</groupId>
   		<artifactId>presto-spi</artifactId>
   		<version>0.184</version>
   	</dependency>
+    <dependency>
+        <groupId>com.amazonaws</groupId>
+        <artifactId>aws-java-sdk-cloudwatch</artifactId>
+        <version>1.11.336</version>
+    </dependency>
   </dependencies>
 </project>
